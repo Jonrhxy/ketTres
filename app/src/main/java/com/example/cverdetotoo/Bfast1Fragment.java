@@ -4,6 +4,7 @@ import android.Manifest;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -24,6 +25,12 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.firestore.FieldValue;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.SetOptions;
+
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
 import org.opencv.core.Mat;
@@ -38,13 +45,19 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 public class Bfast1Fragment extends AppCompatActivity {
 
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 100;
+    private static final String TAG = "Bfast1Fragment";
 
     private TextView textViewResult;
     private TextView textViewScore;
@@ -64,14 +77,16 @@ public class Bfast1Fragment extends AppCompatActivity {
     private static final int MODEL_INPUT_WIDTH = 224;
     private static final int MODEL_INPUT_HEIGHT = 224;
     private static final int MODEL_PIXEL_SIZE = 3;    // RGB
-    private static final int BYTES_PER_CHANNEL = 4;     // float32
-    // Updated to reflect new model classes count (55 classes)
+    private static final int BYTES_PER_CHANNEL = 4;   // float32
+    // Number of classes in your model
     private static final int MODEL_OUTPUT_CLASSES = 55;
 
     private ActivityResultLauncher<Intent> cameraLauncher;
-    // Launcher for gallery selection
     private ActivityResultLauncher<String> galleryLauncher;
+
     private int score = 0;
+    // Flag to ensure Firestore is updated only once when score >= 50 (if needed)
+    private boolean firestorePointsAdded = false;
 
     static {
         if (!OpenCVLoader.initDebug()) {
@@ -112,7 +127,7 @@ public class Bfast1Fragment extends AppCompatActivity {
             return;
         }
 
-        // Load labels from assets.
+        // Load labels from assets (labels.txt).
         labels = loadLabels("labels.txt");
         if (labels.isEmpty()) {
             textViewResult.setText("No labels found. Make sure labels.txt is in assets.");
@@ -139,7 +154,7 @@ public class Bfast1Fragment extends AppCompatActivity {
                 }
         );
 
-        // Set up gallery launcher.
+        // Set up gallery launcher for image selection.
         galleryLauncher = registerForActivityResult(
                 new ActivityResultContracts.GetContent(),
                 uri -> {
@@ -170,18 +185,18 @@ public class Bfast1Fragment extends AppCompatActivity {
         buttonTakePhoto.setOnClickListener(v -> {
             if (ContextCompat.checkSelfPermission(Bfast1Fragment.this, Manifest.permission.CAMERA)
                     != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(Bfast1Fragment.this,
+                ActivityCompat.requestPermissions(
+                        Bfast1Fragment.this,
                         new String[]{Manifest.permission.CAMERA},
-                        CAMERA_PERMISSION_REQUEST_CODE);
+                        CAMERA_PERMISSION_REQUEST_CODE
+                );
             } else {
                 launchCamera();
             }
         });
 
-        // New button click: launch gallery to pick an image.
-        buttonUploadImage.setOnClickListener(v -> {
-            galleryLauncher.launch("image/*");
-        });
+        // Button click: launch gallery to pick an image.
+        buttonUploadImage.setOnClickListener(v -> galleryLauncher.launch("image/*"));
     }
 
     // Launches the camera intent.
@@ -216,9 +231,6 @@ public class Bfast1Fragment extends AppCompatActivity {
 
     /**
      * Displays a chat bubble with the given message.
-     * @param message The text to display.
-     * @param hideCharacterAfter If true, the character is hidden after the bubble fades.
-     * @param showDurationMs Duration in milliseconds to keep the bubble visible.
      */
     private void showChatBubble(String message, boolean hideCharacterAfter, int showDurationMs) {
         textViewChatBubble.setText(message);
@@ -238,7 +250,8 @@ public class Bfast1Fragment extends AppCompatActivity {
 
     /**
      * Processes the captured image by running the TFLite model for classification,
-     * updating the score, and changing the character's expression.
+     * updating the score, and updating Firestore (only the CYCF document).
+     * (BattleEco updates should be handled separately in your game logic.)
      */
     private void processTestImage(Bitmap bitmap) {
         float[] probabilities = classifyImageProbabilities(bitmap);
@@ -254,10 +267,10 @@ public class Bfast1Fragment extends AppCompatActivity {
         }
         String predictedLabel = labels.get(maxIndex);
 
-        String resultText = "";
-        int pointsAwarded = 0;
+        String resultText;
+        int pointsAwarded;
 
-        // Switch-case logic based on new model classes
+        // Switch-case logic based on model classes.
         switch (predictedLabel.toLowerCase()) {
             case "rice":
                 resultText = "Rice detected!\nCarbon Emission: 0.5 kg CO₂-e per serving";
@@ -299,186 +312,6 @@ public class Bfast1Fragment extends AppCompatActivity {
                 resultText = "Meat detected!\nCarbon Emission: 3.5 kg CO₂-e per serving";
                 pointsAwarded = 1;
                 break;
-            case "utensils":
-                resultText = "Utensils detected!\n(No carbon emission data available)";
-                pointsAwarded = 0;
-                break;
-            case "bottle":
-                resultText = "Bottle detected!\n(No carbon emission data available)";
-                pointsAwarded = 0;
-                break;
-            case "roasted chicken":
-                resultText = "Roasted Chicken detected!\nCarbon Emission: 2.2 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "burger":
-                resultText = "Burger detected!\nCarbon Emission: 3.0 kg CO₂-e per serving";
-                pointsAwarded = 1;
-                break;
-            case "noodle dishes":
-                resultText = "Noodle Dishes detected!\nCarbon Emission: 0.7 kg CO₂-e per serving";
-                pointsAwarded = 6;
-                break;
-            case "peach":
-                resultText = "Peach detected!\nCarbon Emission: 0.3 kg CO₂-e per serving";
-                pointsAwarded = 14;
-                break;
-            case "french fries":
-                resultText = "French Fries detected!\nCarbon Emission: 1.2 kg CO₂-e per serving";
-                pointsAwarded = 6;
-                break;
-            case "roasted pig":
-                resultText = "Roasted Pig detected!\nCarbon Emission: 5.0 kg CO₂-e per serving";
-                pointsAwarded = 0;
-                break;
-            case "adobong manok":
-                resultText = "Adobong Manok detected!\nCarbon Emission: 2.5 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "adobong baboy":
-                resultText = "Adobong Baboy detected!\nCarbon Emission: 3.5 kg CO₂-e per serving";
-                pointsAwarded = 1;
-                break;
-            case "beef kaldereta":
-                resultText = "Beef Kaldereta detected!\nCarbon Emission: 4.0 kg CO₂-e per serving";
-                pointsAwarded = 0;
-                break;
-            case "pork menudo":
-                resultText = "Pork Menudo detected!\nCarbon Emission: 3.8 kg CO₂-e per serving";
-                pointsAwarded = 1;
-                break;
-            case "bicol express":
-                resultText = "Bicol Express detected!\nCarbon Emission: 3.6 kg CO₂-e per serving";
-                pointsAwarded = 1;
-                break;
-            case "chicken curry":
-                resultText = "Chicken Curry detected!\nCarbon Emission: 2.7 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "kare kare":
-                resultText = "Kare Kare detected!\nCarbon Emission: 4.0 kg CO₂-e per serving";
-                pointsAwarded = 0;
-                break;
-            case "adobong sitaw with pork":
-                resultText = "Adobong Sitaw with Pork detected!\nCarbon Emission: 3.5 kg CO₂-e per serving";
-                pointsAwarded = 1;
-                break;
-            case "adobong sitaw with chicken":
-                resultText = "Adobong Sitaw with Chicken detected!\nCarbon Emission: 2.5 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "pineapple":
-                resultText = "Pineapple detected!\nCarbon Emission: 0.2 kg CO₂-e per serving";
-                pointsAwarded = 15;
-                break;
-            case "bread":
-                resultText = "Bread detected!\nCarbon Emission: 0.3 kg CO₂-e per serving";
-                pointsAwarded = 14;
-                break;
-            case "dairy milk":
-                resultText = "Dairy Milk detected!\nCarbon Emission: 1.0 kg CO₂-e per serving";
-                pointsAwarded = 8;
-                break;
-            case "beer":
-                resultText = "Beer detected!\nCarbon Emission: 0.8 kg CO₂-e per serving";
-                pointsAwarded = 10;
-                break;
-            case "deep-fried hard-boiled eggs":
-                resultText = "Deep-fried Hard-boiled Eggs detected!\nCarbon Emission: 0.9 kg CO₂-e per serving";
-                pointsAwarded = 9;
-                break;
-            case "siomai":
-                resultText = "Siomai detected!\nCarbon Emission: 0.5 kg CO₂-e per serving";
-                pointsAwarded = 10;
-                break;
-            case "fishball":
-                resultText = "Fishball detected!\nCarbon Emission: 1.1 kg CO₂-e per serving";
-                pointsAwarded = 7;
-                break;
-            case "kikiam":
-                resultText = "Kikiam detected!\nCarbon Emission: 1.0 kg CO₂-e per serving";
-                pointsAwarded = 8;
-                break;
-            case "cold beverages":
-                resultText = "Cold Beverages detected!\nCarbon Emission: 0.5 kg CO₂-e per serving";
-                pointsAwarded = 10;
-                break;
-            case "calamares":
-                resultText = "Calamares detected!\nCarbon Emission: 1.3 kg CO₂-e per serving";
-                pointsAwarded = 6;
-                break;
-            case "hand":
-                resultText = "Hand detected!\n(No carbon emission data available)";
-                pointsAwarded = 0;
-                break;
-            case "human face":
-                resultText = "Human Face detected!\n(No carbon emission data available)";
-                pointsAwarded = 0;
-                break;
-            case "shawarma":
-                resultText = "Shawarma detected!\nCarbon Emission: 2.8 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "pastil":
-                resultText = "Pastil detected!\nCarbon Emission: 2.0 kg CO₂-e per serving";
-                pointsAwarded = 3;
-                break;
-            case "egg":
-                resultText = "Egg detected!\nCarbon Emission: 0.2 kg CO₂-e per serving";
-                pointsAwarded = 15;
-                break;
-            case "donut":
-                resultText = "Donut detected!\nCarbon Emission: 0.5 kg CO₂-e per serving";
-                pointsAwarded = 10;
-                break;
-            case "pinakbet":
-                resultText = "Pinakbet detected!\nCarbon Emission: 0.3 kg CO₂-e per serving";
-                pointsAwarded = 14;
-                break;
-            case "sinigang na isda":
-                resultText = "Sinigang na isda detected!\nCarbon Emission: 1.0 kg CO₂-e per serving";
-                pointsAwarded = 8;
-                break;
-            case "taho":
-                resultText = "Taho detected!\nCarbon Emission: 0.45 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "burger steak":
-                resultText = "Burger Steak detected!\nCarbon Emission: 3.6 kg CO₂-e per serving";
-                pointsAwarded = 6;
-                break;
-            case "tofu":
-                resultText = "Tofu detected!\nCarbon Emission: 0.45 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "shrimp":
-                resultText = "Shrimp detected!\nCarbon Emission: 2.7 kg CO₂-e per serving";
-                pointsAwarded = 4;
-                break;
-            case "hotdog":
-                resultText = "Hotdog detected!\nCarbon Emission: 0.7 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "peanut":
-                resultText = "Peanut detected!\nCarbon Emission: 0.25 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "almonds":
-                resultText = "Almonds detected!\nCarbon Emission: 0.03 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "tomato":
-                resultText = "Tomato detected!\nCarbon Emission: 0.21 kg CO₂-e per serving";
-                pointsAwarded = 4;
-                break;
-            case "oatmeal":
-                resultText = "Oatmeal detected!\nCarbon Emission: 0.25 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
-            case "corn":
-                resultText = "Corn detected!\nCarbon Emission: 0.17 kg CO₂-e per serving";
-                pointsAwarded = 2;
-                break;
             default:
                 resultText = "Prediction: " + predictedLabel + "\n(No custom match found.)";
                 pointsAwarded = 0;
@@ -489,7 +322,20 @@ public class Bfast1Fragment extends AppCompatActivity {
         score += pointsAwarded;
         textViewScore.setText("Score: " + score);
 
-        // Build a string with the top 3 predictions.
+        // Save points to SharedPreferences.
+        SharedPreferences gamePrefs = getSharedPreferences("GameStats", MODE_PRIVATE);
+        SharedPreferences.Editor editor = gamePrefs.edit();
+        editor.putString("cycf_points", "Total Points: " + score);
+        editor.apply();
+
+        // Prepare date string.
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault());
+        String dateString = sdf.format(new Date());  // e.g. "2025-03-13 08:28"
+
+        // Update only the CYCF document in Firestore.
+        storeCYCFData(predictedLabel, pointsAwarded, 10, dateString);
+
+        // Build a string with the top 3 predictions for reference.
         Integer[] sortedIndices = new Integer[MODEL_OUTPUT_CLASSES];
         for (int i = 0; i < MODEL_OUTPUT_CLASSES; i++) {
             sortedIndices[i] = i;
@@ -517,6 +363,37 @@ public class Bfast1Fragment extends AppCompatActivity {
     }
 
     /**
+     * Updates the CYCF document in Firestore with the image processing results.
+     * (Note: BattleEco updates are handled elsewhere.)
+     */
+    private void storeCYCFData(String predictedLabel, long points, long coins, String dateString) {
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+        FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
+        String username = "unknown";
+        if (currentUser != null) {
+            username = currentUser.getDisplayName();
+            if (username == null || username.isEmpty()) {
+                username = currentUser.getUid();
+            }
+        }
+
+        Map<String, Object> cycfData = new HashMap<>();
+        cycfData.put("foodItemDetected", predictedLabel);
+        cycfData.put("points", points);
+        cycfData.put("coins", coins);
+        cycfData.put("date", dateString);
+        cycfData.put("timestamp", FieldValue.serverTimestamp());
+
+        db.collection("Gamez")
+                .document(username)
+                .collection("records")
+                .document("CYCF")
+                .set(cycfData, SetOptions.merge())
+                .addOnSuccessListener(aVoid -> Log.d(TAG, "CYCF updated"))
+                .addOnFailureListener(e -> Log.e(TAG, "Failed to update CYCF: " + e.getMessage()));
+    }
+
+    /**
      * Runs classification on the given Bitmap using the TFLite model.
      */
     private float[] classifyImageProbabilities(Bitmap bitmap) {
@@ -527,7 +404,7 @@ public class Bfast1Fragment extends AppCompatActivity {
     }
 
     /**
-     * Converts the input Bitmap to a ByteBuffer.
+     * Converts the input Bitmap to a ByteBuffer for the TFLite model.
      */
     private ByteBuffer convertBitmapToByteBuffer(Bitmap bitmap) {
         Bitmap resized = Bitmap.createScaledBitmap(bitmap, MODEL_INPUT_WIDTH, MODEL_INPUT_HEIGHT, true);
@@ -549,7 +426,7 @@ public class Bfast1Fragment extends AppCompatActivity {
     }
 
     /**
-     * Loads labels from the specified file in assets.
+     * Loads labels from the specified file in assets (labels.txt).
      */
     private List<String> loadLabels(String fileName) {
         List<String> labelList = new ArrayList<>();

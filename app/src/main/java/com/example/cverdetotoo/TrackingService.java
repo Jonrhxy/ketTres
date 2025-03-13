@@ -50,7 +50,7 @@ public class TrackingService extends Service implements LocationListener {
     private static final float MAX_DISTANCE_DELTA = 50f;
     private static final float MIN_DISTANCE_DELTA = 3f;
 
-    // SharedPreferences keys (common file for both classes)
+    // SharedPreferences keys
     private static final String PREFS_NAME = "session_prefs";
     private static final String KEY_TOTAL_DISTANCE = "total_distance";
     private static final String KEY_TOTAL_ACTIVE_TIME = "accumulated_active_time";
@@ -72,7 +72,7 @@ public class TrackingService extends Service implements LocationListener {
     private LocationManager locationManager;
     private List<Location> locations = new ArrayList<>();
     private float totalDistance = 0;   // in meters
-    private long startTime = 0;        // when tracking starts (ms)
+    private long startTime = 0;        // tracking start time (ms)
     private long totalActiveTime = 0;  // accumulated active time (ms)
     private Handler handler = new Handler();
 
@@ -86,7 +86,7 @@ public class TrackingService extends Service implements LocationListener {
     private FirebaseFirestore db;
     private String displayName = "unknown";
 
-    // Daily session id (formatted as yyyyMMdd)
+    // Daily session id (yyyyMMdd)
     private String currentSessionId = null;
     private boolean isRewardGiven = false;
 
@@ -105,7 +105,7 @@ public class TrackingService extends Service implements LocationListener {
             currentSessionId = new SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(new Date());
             SharedPreferences.Editor editor = prefs.edit();
             editor.putString(KEY_SESSION_ID, currentSessionId);
-            editor.commit(); // Use commit() for synchronous saving
+            editor.commit();
 
             FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
             if (currentUser != null && currentUser.getDisplayName() != null) {
@@ -329,6 +329,19 @@ public class TrackingService extends Service implements LocationListener {
         }
     }
 
+    // New method to update coins from within the service.
+    private void updateUserCoinsInService(int coinIncrement) {
+        db.collection("Games")
+                .document(displayName)
+                .collection("trackingwalk")
+                .document(currentSessionId)
+                .update("coins", FieldValue.increment(coinIncrement))
+                .addOnSuccessListener(aVoid ->
+                        Log.d(TAG, "Coins successfully updated in service."))
+                .addOnFailureListener((@NonNull Exception e) ->
+                        Log.e(TAG, "Failed to update coins in service: " + e.getMessage()));
+    }
+
     private void requestLocationUpdates() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) {
@@ -398,7 +411,7 @@ public class TrackingService extends Service implements LocationListener {
                 currentActiveTime += (System.currentTimeMillis() - startTime);
             }
             editor.putLong(KEY_TOTAL_ACTIVE_TIME, currentActiveTime);
-            editor.commit(); // Use commit() to ensure immediate saving
+            editor.commit();
             Log.d(TAG, "saveServiceData: totalDistance=" + totalDistance
                     + ", totalActiveTime=" + currentActiveTime);
         } catch (Exception e) {
@@ -418,6 +431,10 @@ public class TrackingService extends Service implements LocationListener {
         }
     }
 
+    /**
+     * Checks if the goal is reached; if so, stores the final record and awards coins.
+     * This method is called every second from the notification updater.
+     */
     private void storeTrackingRecordIfGoalReached() {
         try {
             if (isRewardGiven) return;
@@ -489,18 +506,24 @@ public class TrackingService extends Service implements LocationListener {
                     .document(currentSessionId)
                     .set(data, SetOptions.merge())
                     .addOnSuccessListener(aVoid -> {
+                        // Award coins in the service as well.
+                        updateUserCoinsInService(100);
+                        // Optionally, update highScore in the parent doc.
                         db.collection("Games")
                                 .document(displayName)
                                 .update("highScore", FieldValue.increment(pointsEarned));
                     })
-                    .addOnFailureListener(e -> Log.e(TAG, "Failed to update tracking record on goal: " + e.getMessage()));
+                    .addOnFailureListener((@NonNull Exception e) ->
+                            Log.e(TAG, "Failed to update tracking record on goal: " + e.getMessage()));
         } catch (Exception e) {
             Log.e(TAG, "Error in storeTrackingRecordIfGoalReached: " + e.getMessage());
         }
     }
 
-    @Override public void onStatusChanged(String provider, int status, android.os.Bundle extras) {}
-    @Override public void onProviderEnabled(@NonNull String provider) {}
-    @Override public void onProviderDisabled(@NonNull String provider) {}
-
+    @Override
+    public void onStatusChanged(String provider, int status, android.os.Bundle extras) { }
+    @Override
+    public void onProviderEnabled(@NonNull String provider) { }
+    @Override
+    public void onProviderDisabled(@NonNull String provider) { }
 }

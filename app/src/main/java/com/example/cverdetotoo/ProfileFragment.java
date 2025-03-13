@@ -191,18 +191,91 @@ public class ProfileFragment extends Fragment {
     }
 
     private void fetchCoinPoints() {
-        DocumentReference pointsRef = db.collection("Games").document("Jonr");
-        pointsRef.get().addOnSuccessListener(documentSnapshot -> {
-            if (documentSnapshot.exists()) {
-                Long points = documentSnapshot.getLong("points");
-                if (points != null) {
-                    textCoinValue.setText(String.valueOf(points));
-                }
+        if (mAuth.getCurrentUser() != null) {
+            String username = mAuth.getCurrentUser().getDisplayName();
+            if (username != null && !username.isEmpty()) {
+
+                // We'll keep a running total in an array (so we can modify it in callbacks)
+                final long[] totalCoins = {0};
+
+                // 1) Fetch main doc: Games/[username]
+                db.collection("Games")
+                        .document(username)
+                        .get()
+                        .addOnSuccessListener(docSnap -> {
+                            if (docSnap.exists()) {
+                                Long mainCoins = docSnap.getLong("coins");
+                                if (mainCoins != null) {
+                                    totalCoins[0] += mainCoins;
+                                }
+                            }
+                            // 2) Fetch BattleEco doc
+                            db.collection("Gamez")
+                                    .document(username)
+                                    .collection("records")
+                                    .document("BattleEco")
+                                    .get()
+                                    .addOnSuccessListener(battleSnap -> {
+                                        if (battleSnap.exists()) {
+                                            Long battleCoins = battleSnap.getLong("coins");
+                                            if (battleCoins != null) {
+                                                totalCoins[0] += battleCoins;
+                                            }
+                                        }
+                                        // 3) Fetch CYCF doc
+                                        db.collection("Gamez")
+                                                .document(username)
+                                                .collection("records")
+                                                .document("CYCF")
+                                                .get()
+                                                .addOnSuccessListener(cycfSnap -> {
+                                                    if (cycfSnap.exists()) {
+                                                        Long cycfCoins = cycfSnap.getLong("coins");
+                                                        if (cycfCoins != null) {
+                                                            totalCoins[0] += cycfCoins;
+                                                        }
+                                                    }
+
+                                                    // Finally, display the sum in textCoinValue
+                                                    textCoinValue.setText(String.valueOf(totalCoins[0]));
+
+                                                })
+                                                .addOnFailureListener(e -> {
+                                                    // If CYCF fails, show partial total
+                                                    textCoinValue.setText(String.valueOf(totalCoins[0]));
+                                                    Toast.makeText(getActivity(),
+                                                            "Failed to fetch CYCF coins: " + e.getMessage(),
+                                                            Toast.LENGTH_SHORT
+                                                    ).show();
+                                                });
+                                    })
+                                    .addOnFailureListener(e -> {
+                                        // If BattleEco fails, skip it
+                                        textCoinValue.setText(String.valueOf(totalCoins[0]));
+                                        Toast.makeText(getActivity(),
+                                                "Failed to fetch BattleEco coins: " + e.getMessage(),
+                                                Toast.LENGTH_SHORT
+                                        ).show();
+                                    });
+                        })
+                        .addOnFailureListener(e -> {
+                            // If main doc fails, default to 0
+                            textCoinValue.setText("0");
+                            Toast.makeText(getActivity(),
+                                    "Failed to fetch main doc coins: " + e.getMessage(),
+                                    Toast.LENGTH_SHORT
+                            ).show();
+                        });
+            } else {
+                // username is empty
+                textCoinValue.setText("0");
             }
-        }).addOnFailureListener(e -> {
-            Toast.makeText(getActivity(), "Failed to fetch coin points", Toast.LENGTH_SHORT).show();
-        });
+        } else {
+            // no currentUser
+            textCoinValue.setText("0");
+        }
     }
+
 
     private List<CharacterModel> loadCharactersFromStorage(SharedPreferences prefs) {
         String json = prefs.getString("characters", null);

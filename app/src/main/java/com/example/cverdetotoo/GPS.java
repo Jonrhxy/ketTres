@@ -39,7 +39,7 @@ import androidx.core.content.ContextCompat;
 
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
-import com.google.firebase.firestore.DocumentSnapshot;
+import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.FieldValue;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.SetOptions;
@@ -117,7 +117,6 @@ public class GPS extends AppCompatActivity implements LocationListener {
     private long sessionStartTime = 0;
     private boolean isBadgePopupShown = false;
     private boolean goalReached = false;
-
 
     // Firestore
     private FirebaseFirestore db;
@@ -492,7 +491,6 @@ public class GPS extends AppCompatActivity implements LocationListener {
         mapView.invalidate();
     }
 
-
     private void updatePolyline() {
         try {
             ArrayList<GeoPoint> geoPoints = new ArrayList<>();
@@ -518,6 +516,10 @@ public class GPS extends AppCompatActivity implements LocationListener {
         }
     }
 
+    /**
+     * Updates the UI stats and checks if the step goal is reached.
+     * If 1500 steps (GOAL_STEPS) is reached, 100 coins are awarded.
+     */
     private void updateStats() {
         // If goal is reached, do not update further.
         if (goalReached) return;
@@ -572,12 +574,12 @@ public class GPS extends AppCompatActivity implements LocationListener {
             applyGradientToText(textTimeValue, startColor, endColor);
             applyGradientToText(textStepsValue, startColor, endColor);
 
-            // If the goal is reached, stop tracking and show the badge popup
+            // If the goal is reached, stop tracking, update coins, and show the badge popup.
             if (realStepCount >= GOAL_STEPS && !isBadgePopupShown) {
-                // Mark goal as reached so no further updates are applied.
                 goalReached = true;
                 pauseTracking();
                 stopTrackingService();
+                updateUserCoins(100); // Award 100 coins when 1500 steps are reached.
                 showBadgePopup();
                 isBadgePopupShown = true;
             }
@@ -586,7 +588,19 @@ public class GPS extends AppCompatActivity implements LocationListener {
         }
     }
 
-
+    /**
+     * Updates the user's Firestore record in the "Games" collection by incrementing the "coins" field.
+     */
+    private void updateUserCoins(int coinIncrement) {
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+        db.collection("Games")
+                .document(displayName)
+                .update("coins", FieldValue.increment(coinIncrement))
+                .addOnSuccessListener(aVoid ->
+                        Toast.makeText(GPS.this, "Congrats! 100 coins awarded.", Toast.LENGTH_SHORT).show())
+                .addOnFailureListener(e ->
+                        Toast.makeText(GPS.this, "Failed to update coins: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+    }
 
     private void showBadgePopup() {
         try {
@@ -616,6 +630,7 @@ public class GPS extends AppCompatActivity implements LocationListener {
             Log.e(TAG, "Error showing badge popup: " + e.getMessage());
         }
     }
+
     private void createInitialTrackingRecord() {
         try {
             if (currentSessionId == null) {

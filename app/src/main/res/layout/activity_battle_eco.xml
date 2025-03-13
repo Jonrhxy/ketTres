@@ -36,7 +36,6 @@
         app:layout_constraintStart_toStartOf="@id/timerText"
         app:layout_constraintTop_toBottomOf="@id/timerText" />
 
-
     <!-- ====== Player Stats (top-left) ====== -->
     <TextView
         android:id="@+id/playerHealthText"
@@ -142,11 +141,6 @@
         app:layout_constraintVertical_bias="0.5" />
 
     <!-- ====== Player Drawn Card (invisible by default) ====== -->
-
-    <!-- ====== AI Drawn Card (invisible by default) ====== -->
-
-    <!-- ====== Battle Log (bottom center) ====== -->
-
     <ImageView
         android:id="@+id/playerDrawnCard"
         android:layout_width="127dp"
@@ -162,6 +156,7 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintVertical_bias="0.497" />
 
+    <!-- ====== AI Drawn Card (invisible by default) ====== -->
     <ImageView
         android:id="@+id/aiDrawnCard"
         android:layout_width="127dp"
@@ -177,6 +172,7 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintVertical_bias="0.497" />
 
+    <!-- ====== Battle Log (bottom center) ====== -->
     <TextView
         android:id="@+id/battleLogText"
         android:layout_width="398dp"
@@ -268,6 +264,14 @@
                 android:layout_height="wrap_content"
                 android:text="Restart"
                 android:layout_margin="8dp" />
+
+            <!-- Exit Button inside the Pause Panel -->
+            <Button
+                android:id="@+id/exitButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Exit"
+                android:layout_margin="8dp" />
         </LinearLayout>
     </LinearLayout>
 
@@ -297,7 +301,6 @@
             android:gravity="center">
 
             <ScrollView
-                xmlns:android="http://schemas.android.com/apk/res/android"
                 android:id="@+id/instructionsScrollView"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

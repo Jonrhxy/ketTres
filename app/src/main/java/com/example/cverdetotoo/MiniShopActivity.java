@@ -9,6 +9,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.firestore.FieldValue;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.gson.Gson;
@@ -46,21 +47,8 @@ public class MiniShopActivity extends AppCompatActivity {
         userCoins = prefs.getInt("coins", 500);
         textUserCoins.setText("Coins: " + userCoins);
 
-        // Fetch coins from Firestore and update (assuming coins are stored in "Games/Jonr/points")
-        db.collection("Games").document("Jonr")
-                .get()
-                .addOnSuccessListener(documentSnapshot -> {
-                    if (documentSnapshot.exists()) {
-                        Long points = documentSnapshot.getLong("points");
-                        if (points != null) {
-                            userCoins = points.intValue();
-                            textUserCoins.setText("Coins: " + userCoins);
-                            prefs.edit().putInt("coins", userCoins).apply();
-                        }
-                    }
-                }).addOnFailureListener(e ->
-                        Toast.makeText(MiniShopActivity.this, "Failed to fetch coins", Toast.LENGTH_SHORT).show()
-                );
+        // Fetch coins from multiple Firestore locations and update UI:
+        fetchCoinPoints();
 
         // Load the character list from SharedPreferences (merging missing defaults if needed)
         characterList = loadCharactersFromStorage();
@@ -113,6 +101,80 @@ public class MiniShopActivity extends AppCompatActivity {
             }
         });
         recyclerCharacters.setAdapter(adapter);
+    }
+
+    /**
+     * Fetches coins from three sources:
+     * 1. From Games/[username] document (field: coins)
+     * 2. From Gamez/[username]/records/BattleEco document (field: coins)
+     * 3. From Gamez/[username]/records/CYCF document (field: coins)
+     * and then sums them to update textUserCoins.
+     */
+    private void fetchCoinPoints() {
+        if (FirebaseAuth.getInstance().getCurrentUser() != null) {
+            String username = FirebaseAuth.getInstance().getCurrentUser().getDisplayName();
+            if (username != null && !username.isEmpty()) {
+                final long[] totalCoins = {0};
+
+                // 1) Fetch from Games/[username] document
+                db.collection("Games").document(username)
+                        .get()
+                        .addOnSuccessListener(documentSnapshot -> {
+                            if (documentSnapshot.exists()) {
+                                Long mainCoins = documentSnapshot.getLong("coins");
+                                if (mainCoins != null) {
+                                    totalCoins[0] += mainCoins;
+                                }
+                            }
+                            // 2) Fetch from Gamez/[username]/records/BattleEco document
+                            db.collection("Gamez").document(username)
+                                    .collection("records")
+                                    .document("BattleEco")
+                                    .get()
+                                    .addOnSuccessListener(battleSnap -> {
+                                        if (battleSnap.exists()) {
+                                            Long battleCoins = battleSnap.getLong("coins");
+                                            if (battleCoins != null) {
+                                                totalCoins[0] += battleCoins;
+                                            }
+                                        }
+                                        // 3) Fetch from Gamez/[username]/records/CYCF document
+                                        db.collection("Gamez").document(username)
+                                                .collection("records")
+                                                .document("CYCF")
+                                                .get()
+                                                .addOnSuccessListener(cycfSnap -> {
+                                                    if (cycfSnap.exists()) {
+                                                        Long cycfCoins = cycfSnap.getLong("coins");
+                                                        if (cycfCoins != null) {
+                                                            totalCoins[0] += cycfCoins;
+                                                        }
+                                                    }
+                                                    // Update UI with the combined total
+                                                    userCoins = (int) totalCoins[0];
+                                                    textUserCoins.setText("Coins: " + userCoins);
+                                                    prefs.edit().putInt("coins", userCoins).apply();
+                                                })
+                                                .addOnFailureListener(e -> {
+                                                    textUserCoins.setText(String.valueOf(totalCoins[0]));
+                                                    Toast.makeText(MiniShopActivity.this, "Error fetching CYCF coins: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                                                });
+                                    })
+                                    .addOnFailureListener(e -> {
+                                        textUserCoins.setText(String.valueOf(totalCoins[0]));
+                                        Toast.makeText(MiniShopActivity.this, "Error fetching BattleEco coins: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                                    });
+                        })
+                        .addOnFailureListener(e -> {
+                            textUserCoins.setText("0");
+                            Toast.makeText(MiniShopActivity.this, "Error fetching main coins: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                        });
+            } else {
+                textUserCoins.setText("0");
+            }
+        } else {
+            textUserCoins.setText("0");
+        }
     }
 
     /**
